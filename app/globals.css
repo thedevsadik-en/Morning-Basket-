@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #F6F1E4; /* Rice cream */
+    --foreground: #23301B; /* Deep moss */
+    --primary: #2C5F2D;    /* Leaf/brand green */
+    --primary-foreground: #FFFFFF;
+  }
+
+  body {
+    color: var(--foreground);
+    background-color: var(--background);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
