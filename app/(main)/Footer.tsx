@@ -40,7 +40,7 @@ export default function Footer() {
             </li>
             <li>
               <a
-                href="tel:+8801712069030"
+                href="tel:+8801334981114"
                 className="opacity-80 hover:opacity-100 hover:text-white transition-opacity"
               >
                 Direct Hotline

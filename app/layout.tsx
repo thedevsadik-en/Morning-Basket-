@@ -22,21 +22,21 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Morning Basket | Fresh Vegetables Delivered Daily",
+    default: "Morning Basket | Fresh Grocery & Vegetable Delivery in Dhanmondi, Dhaka",
     template: "%s | Morning Basket",
   },
   description:
-    "Farm-fresh vegetables sourced at 5 AM, delivered by 9 AM across Dhanmondi.",
+    "Farm-fresh vegetables sourced at 5 AM, triple-washed, and delivered by 9 AM exclusively in Dhanmondi, Dhaka. 100% Cash on Delivery.",
   keywords: ["groceries", "fresh vegetables", "Dhanmondi delivery", "organic farm produce"],
   openGraph: {
-    title: "Morning Basket",
-    description: "Farm-fresh vegetables sourced at 5 AM, delivered by 9 AM in Dhanmondi.",
+    title: "Morning Basket | Fresh Grocery & Vegetable Delivery in Dhanmondi, Dhaka",
+    description: "Farm-fresh vegetables sourced at 5 AM, triple-washed, and delivered by 9 AM exclusively in Dhanmondi, Dhaka. 100% Cash on Delivery.",
     siteName: "Morning Basket",
     locale: "en_US",
     type: "website",
   },
   icons: {
-    icon: "/favicon.ico",
+    icon: "/icon.png",
   },
 };
 
