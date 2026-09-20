@@ -27,7 +27,7 @@ export default function Footer() {
           <ul className="space-y-2.5 text-sm">
             <li>
               <a
-                href="https://wa.me/8801712069030?text=Hi%20Morning%20Basket,%20I%20need%20help%20with%20an%20order."
+                href="https://wa.me/8801336986661"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="opacity-80 hover:opacity-100 hover:text-white transition-opacity flex items-center gap-1.5"
