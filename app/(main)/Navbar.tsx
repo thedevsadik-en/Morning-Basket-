@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "@/lib/useCart";
@@ -12,7 +12,7 @@ const NAV_LINKS = [
   { label: "Feedback", href: "/feedback" },
 ];
 
-export default function Navbar() {
+function NavbarContent() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -202,5 +202,13 @@ export default function Navbar() {
         </div>
       )}
     </nav>
+  );
+}
+
+export default function Navbar() {
+  return (
+    <Suspense fallback={<div className="h-14 w-full bg-[#F0EDE6]/90 sticky top-0 z-50 border-b border-[#2C5F2D]/10" />}>
+      <NavbarContent />
+    </Suspense>
   );
 }
