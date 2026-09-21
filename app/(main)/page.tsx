@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo, useTransition } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import { useState, useEffect, useMemo, useTransition, Suspense } from "react";
+import Image from "next/image";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCart, CartUnit } from "@/lib/useCart";
 import { supabase } from "@/lib/supabaseClient";
 import ReviewCarousel from "./components/ReviewCarousel";
+
 
 type Product = {
   id: string;
@@ -18,7 +20,6 @@ type Product = {
   is_best_seller: boolean;
 };
 
-const MINIMUM_ORDER_VALUE = 450;
 
 // Discrete units that should not have fractional steps or Kg/g toggles
 const DISCRETE_UNITS = [
@@ -53,13 +54,19 @@ function SkeletonCard() {
   );
 }
 
-export default function Home() {
+function HomeContent() {
   const { cart, addOrUpdate, totalItems } = useCart();
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [minimumOrderValue, setMinimumOrderValue] = useState(450); // Default fallback
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const urlCategory = searchParams.get("category");
+
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [isDefaultLoad, setIsDefaultLoad] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [addedFeedbackId, setAddedFeedbackId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -76,6 +83,19 @@ export default function Home() {
     }));
   };
 
+  useEffect(() => {
+    if (urlCategory) {
+      setSelectedCategory(urlCategory.toLowerCase());
+      setIsDefaultLoad(false);
+    }
+  }, [urlCategory]);
+
+  useEffect(() => {
+    if (searchQuery) setIsDefaultLoad(false);
+  }, [searchQuery]);
+
+  const [categoryOptions, setCategoryOptions] = useState<{ label: string, value: string }[]>([{ label: "All Items", value: "all" }]);
+
   // Run catalog fetch ONCE on mount so adding items never flashes skeletons
   useEffect(() => {
     async function fetchStorefrontProducts() {
@@ -83,6 +103,18 @@ export default function Home() {
       setFetchError(null);
 
       try {
+        // Fetch store settings
+        const { data: settingsData } = await supabase.from('store_settings').select('minimum_order_value').single();
+        if (settingsData) {
+          setMinimumOrderValue(settingsData.minimum_order_value);
+        }
+
+        const { data: catData } = await supabase.from('categories').select('*').order('name');
+        if (catData) {
+          const opts = catData.map(c => ({ label: c.name, value: c.name.toLowerCase() }));
+          setCategoryOptions([{ label: "All Items", value: "all" }, ...opts]);
+        }
+
         const { data, error } = await supabase
           .from("products")
           .select("id, name, price, unit, category, image_url, is_active, is_best_seller")
@@ -129,27 +161,26 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Categories list derived dynamically from live catalog
-  const categories = useMemo(() => {
-    const list = Array.from(
-      new Set(products.map((p) => p.category?.trim().toLowerCase()).filter(Boolean))
-    ) as string[];
-    return ["all", ...list];
-  }, [products]);
-
   // Filter products by category and search
   const filteredProducts = useMemo(() => {
-    return products.filter((product) => {
-      const matchesCategory =
-        selectedCategory === "all" ||
-        product.category?.toLowerCase() === selectedCategory.toLowerCase();
+    let result = products;
 
-      const query = searchQuery.trim().toLowerCase();
-      const matchesSearch = !query || product.name.toLowerCase().includes(query);
+    if (isDefaultLoad && selectedCategory === "all" && !searchQuery) {
+      result = products.filter(p => p.is_best_seller).slice(0, 12);
+    } else {
+      result = products.filter((product) => {
+        const matchesCategory =
+          selectedCategory === "all" ||
+          product.category?.toLowerCase() === selectedCategory.toLowerCase();
 
-      return matchesCategory && matchesSearch;
-    });
-  }, [products, selectedCategory, searchQuery]);
+        const query = searchQuery.trim().toLowerCase();
+        const matchesSearch = !query || product.name.toLowerCase().includes(query);
+
+        return matchesCategory && matchesSearch;
+      });
+    }
+    return result;
+  }, [products, selectedCategory, searchQuery, isDefaultLoad]);
 
   // Cart total computation supporting weight (Kg/g) and discrete count units
   const cartTotal = useMemo(() => {
@@ -163,8 +194,8 @@ export default function Home() {
     }, 0);
   }, [cart]);
 
-  const neededForMOV = Math.max(0, MINIMUM_ORDER_VALUE - cartTotal);
-  const isMovReached = cartTotal >= MINIMUM_ORDER_VALUE;
+  const neededForMOV = Math.max(0, minimumOrderValue - cartTotal);
+  const isMovReached = cartTotal >= minimumOrderValue;
 
   const handleAddToCart = (product: Product) => {
     const draft = drafts[product.id] ?? { qty: "1", unit: "Kg" as CartUnit };
@@ -245,18 +276,21 @@ export default function Home() {
         <section className="flex-1 min-w-0">
           {/* Controls Bar: Category Filters & Search */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-              {categories.map((cat) => (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 whitespace-nowrap scrollbar-hide">
+              {categoryOptions.map((cat) => (
                 <button
-                  key={cat}
+                  key={cat.value}
                   type="button"
-                  onClick={() => startTransition(() => setSelectedCategory(cat))}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold tracking-wide capitalize whitespace-nowrap transition-all cursor-pointer ${selectedCategory === cat
+                  onClick={() => startTransition(() => {
+                    setSelectedCategory(cat.value);
+                    setIsDefaultLoad(false);
+                  })}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold tracking-wide capitalize whitespace-nowrap transition-all cursor-pointer ${selectedCategory === cat.value
                     ? "bg-accent-green text-white shadow-xs"
                     : "bg-white/70 text-text/60 border border-text/10 hover:text-accent-green"
                     }`}
                 >
-                  {cat === "all" ? "All Items" : cat.replace("-", " ")}
+                  {cat.label}
                 </button>
               ))}
             </div>
@@ -442,11 +476,11 @@ export default function Home() {
 
         {/* ── Cart Sidebar ──────────────────────────────────── */}
         <aside
-  className={`
+          className={`
     fixed bottom-0 left-0 w-full z-40 bg-white border-t border-gray-100 shadow-[0_-6px_20px_-4px_rgba(0,0,0,0.07)] p-4 pb-6 rounded-t-2xl
     md:static md:w-[285px] lg:w-[320px] md:h-fit md:rounded-2xl md:border md:border-gray-100 md:shadow-lg md:p-5 md:sticky md:top-24 shrink-0
   `}
->
+        >
           <div className="hidden md:flex items-center justify-between mb-4 pb-4 border-b border-gray-100">
             <h2 className="font-serif font-bold text-[17px] text-text">Your Basket</h2>
             {totalItems > 0 && (
@@ -467,7 +501,7 @@ export default function Home() {
                 <div
                   className="h-full rounded-full transition-all duration-500 bg-accent-green"
                   style={{
-                    width: `${Math.min((cartTotal / MINIMUM_ORDER_VALUE) * 100, 100)}%`,
+                    width: `${Math.min((cartTotal / minimumOrderValue) * 100, 100)}%`,
                   }}
                 />
               </div>
@@ -510,5 +544,13 @@ export default function Home() {
 
       <ReviewCarousel />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <HomeContent />
+    </Suspense>
   );
 }

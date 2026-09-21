@@ -17,17 +17,12 @@ interface Product {
   created_at?: string;
 }
 
-const CATEGORIES = [
-  { label: "All Categories", value: "all" },
-  { label: "Vegetables", value: "vegetables" },
-  { label: "Fish & Meat", value: "fish-meat" },
-  { label: "Fruits", value: "fruits" },
-  { label: "Spices & Dry", value: "spices" },
-  { label: "Other", value: "other" },
-];
+// Categories are fetched dynamically
+
 
 export default function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<{label: string, value: string}[]>([{ label: "All Categories", value: "all" }]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -41,7 +36,7 @@ export default function InventoryPage() {
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [formData, setFormData] = useState({
     name: "",
-    category: "vegetables",
+    category: "",
     price: "",
     cost_price: "",
     unit: "kg",
@@ -56,6 +51,16 @@ export default function InventoryPage() {
   const fetchProducts = async () => {
     setIsLoading(true);
     try {
+      const { data: catData, error: catError } = await supabase
+        .from("categories")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (!catError && catData) {
+        const catOptions = catData.map((c: any) => ({ label: c.name, value: c.name.toLowerCase() }));
+        setCategories([{ label: "All Categories", value: "all" }, ...catOptions]);
+      }
+
       const { data, error } = await supabase
         .from("products")
         .select("*")
@@ -88,7 +93,7 @@ export default function InventoryPage() {
   const openNewModal = () => {
     setFormData({
       name: "",
-      category: "vegetables",
+      category: categories.length > 1 ? categories[1].value : "other",
       price: "",
       cost_price: "",
       unit: "kg",
@@ -104,7 +109,7 @@ export default function InventoryPage() {
   const handleEdit = (product: Product) => {
     setFormData({
       name: product.name || "",
-      category: product.category || "vegetables",
+      category: product.category || (categories.length > 1 ? categories[1].value : "other"),
       price: String(product.price || ""),
       cost_price: String(product.cost_price || ""),
       unit: product.unit || "kg",
@@ -299,7 +304,7 @@ export default function InventoryPage() {
         </div>
 
         <div className="flex flex-wrap gap-1.5 w-full md:w-auto p-1 bg-white rounded-2xl border border-neutral-200 shadow-xs overflow-x-auto">
-          {CATEGORIES.map((cat) => {
+          {categories.map((cat) => {
             const isActive = selectedCategory === cat.value;
             return (
               <button
@@ -482,11 +487,9 @@ export default function InventoryPage() {
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   >
-                    <option value="vegetables">Vegetables</option>
-                    <option value="fish-meat">Fish & Meat</option>
-                    <option value="fruits">Fruits</option>
-                    <option value="spices">Spices & Dry</option>
-                    <option value="other">Other</option>
+                    {categories.filter(c => c.value !== "all").map(c => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
                   </select>
                 </div>
 

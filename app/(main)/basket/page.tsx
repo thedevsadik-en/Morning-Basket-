@@ -6,9 +6,7 @@ import Link from "next/link";
 import { useCart, CartUnit } from "@/lib/useCart";
 import { supabase } from "@/lib/supabaseClient";
 
-const MINIMUM_ORDER_VALUE = 450;
 const DELIVERY_FEE = 60;
-const BKASH_NUMBER = "01712069030";
 
 interface VerifiedProduct {
   id: string;
@@ -43,6 +41,8 @@ export default function BasketPage() {
   const [trxId, setTrxId] = useState("");
   const [honeypot, setHoneypot] = useState("");
 
+  const [storeSettings, setStoreSettings] = useState({ minimum_order_value: 450, bkash_number: "01712069030" });
+
   // App states
   const [hasMounted, setHasMounted] = useState(false);
   const [verifiedProducts, setVerifiedProducts] = useState<Record<string, VerifiedProduct>>({});
@@ -67,6 +67,14 @@ export default function BasketPage() {
     }
 
     try {
+      const { data: settingsData } = await supabase.from('store_settings').select('minimum_order_value, bkash_number').single();
+      if (settingsData) {
+        setStoreSettings({
+          minimum_order_value: settingsData.minimum_order_value,
+          bkash_number: settingsData.bkash_number,
+        });
+      }
+
       const { data, error } = await supabase
         .from("products")
         .select("id, name, price, unit, image_url, is_active")
@@ -112,8 +120,8 @@ export default function BasketPage() {
     }, 0);
   }, [cartEntries, verifiedProducts]);
 
-  const neededForMOV = Math.max(0, MINIMUM_ORDER_VALUE - cartTotal);
-  const isMovReached = cartTotal >= MINIMUM_ORDER_VALUE;
+  const neededForMOV = Math.max(0, storeSettings.minimum_order_value - cartTotal);
+  const isMovReached = cartTotal >= storeSettings.minimum_order_value;
 
   useEffect(() => {
     if (errorMessage) setErrorMessage(null);
@@ -122,10 +130,10 @@ export default function BasketPage() {
   const handleCopyBkash = async () => {
     try {
       if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(BKASH_NUMBER);
+        await navigator.clipboard.writeText(storeSettings.bkash_number);
       } else {
         const input = document.createElement("input");
-        input.value = BKASH_NUMBER;
+        input.value = storeSettings.bkash_number;
         document.body.appendChild(input);
         input.select();
         document.execCommand("copy");
@@ -167,7 +175,7 @@ export default function BasketPage() {
     }
 
     if (!isMovReached) {
-      setErrorMessage(`Minimum order value is ৳${MINIMUM_ORDER_VALUE}. Please add more items.`);
+      setErrorMessage(`Minimum order value is ৳${storeSettings.minimum_order_value}. Please add more items.`);
       return;
     }
 
@@ -258,8 +266,8 @@ export default function BasketPage() {
         });
       }
 
-      if (authoritativeTotal < MINIMUM_ORDER_VALUE) {
-        setErrorMessage(`Verified order total is ৳${Math.round(authoritativeTotal)}, which is below our ৳${MINIMUM_ORDER_VALUE} minimum.`);
+      if (authoritativeTotal < storeSettings.minimum_order_value) {
+        setErrorMessage(`Verified order total is ৳${Math.round(authoritativeTotal)}, which is below our ৳${storeSettings.minimum_order_value} minimum.`);
         setIsSubmitting(false);
         return;
       }
@@ -512,7 +520,7 @@ export default function BasketPage() {
 
             {!isMovReached && (
               <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-xl p-3 text-center">
-                Add ৳{neededForMOV.toFixed(0)} more produce to meet the ৳{MINIMUM_ORDER_VALUE} minimum order.
+                Add ৳{neededForMOV.toFixed(0)} more produce to meet the ৳{storeSettings.minimum_order_value} minimum order.
               </div>
             )}
           </section>
@@ -614,7 +622,7 @@ export default function BasketPage() {
                 </div>
                 <div className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-[#2C5F2D]/20">
                   <span className="font-mono text-xs font-bold tracking-wider text-text">
-                    {BKASH_NUMBER}
+                    {storeSettings.bkash_number}
                   </span>
                   <button
                     type="button"

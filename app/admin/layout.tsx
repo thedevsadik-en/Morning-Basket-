@@ -42,6 +42,12 @@ export default function AdminLayout({
           >
             Reviews
           </Link>
+          <Link
+            href="/admin/configuration"
+            className="block px-5 py-3 rounded-2xl hover:bg-[#324527] transition-all duration-300 font-medium opacity-90 hover:opacity-100"
+          >
+            Configuration
+          </Link>
         </nav>
 
         <div className="p-6 space-y-3 border-t border-[#324527]/40">

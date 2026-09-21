@@ -4,13 +4,12 @@ import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "@/lib/useCart";
+import { supabase } from "@/lib/supabaseClient";
 
-const NAV_LINKS = [
-  { label: "Vegetables", href: "/vegetables" },
-  { label: "Fish & Meat", href: "/fish-meat" },
-  { label: "Other", href: "/other" },
-  { label: "Feedback", href: "/feedback" },
-];
+interface Category {
+  id: string;
+  name: string;
+}
 
 function NavbarContent() {
   const pathname = usePathname();
@@ -19,8 +18,33 @@ function NavbarContent() {
   const { totalItems } = useCart();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const navRef = useRef<HTMLElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // Fetch dynamic categories
+  useEffect(() => {
+    async function fetchCats() {
+      const { data, error } = await supabase.from("categories").select("*").order("name");
+      if (!error && data) setCategories(data);
+    }
+    fetchCats();
+  }, []);
+
+  const pinnedNames = ["Vegetables", "Fish & Meat"];
+  const pinnedCats = categories.filter(c => pinnedNames.some(p => p.toLowerCase() === c.name.toLowerCase()));
+  const otherCats = categories.filter(c => !pinnedNames.some(p => p.toLowerCase() === c.name.toLowerCase()));
+
+  // Fallback if not yet loaded
+  const displayPinned = pinnedCats.length > 0
+    ? pinnedCats.map(c => ({ label: c.name, href: `/?category=${encodeURIComponent(c.name.toLowerCase())}` }))
+    : pinnedNames.map(name => ({ label: name, href: `/?category=${encodeURIComponent(name.toLowerCase())}` }));
+
+  // Add standard feedback link
+  const NAV_LINKS = [...displayPinned, { label: "Feedback", href: "/feedback" }];
 
   // Sync search input if already on search page
   useEffect(() => {
@@ -29,18 +53,22 @@ function NavbarContent() {
     }
   }, [pathname, searchParams]);
 
-  // Handle click outside and escape key to dismiss mobile drawer
+  // Handle click outside and escape key to dismiss menus
   useEffect(() => {
-    if (!mobileMenuOpen) return;
-
     const handleClickOutside = (e: MouseEvent) => {
       if (navRef.current && !navRef.current.contains(e.target as Node)) {
         setMobileMenuOpen(false);
       }
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileMenuOpen(false);
+      if (e.key === "Escape") {
+        setMobileMenuOpen(false);
+        setDropdownOpen(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -50,7 +78,7 @@ function NavbarContent() {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mobileMenuOpen]);
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,22 +105,60 @@ function NavbarContent() {
 
         {/* Center Desktop Links */}
         <div className="hidden md:flex items-center gap-7">
-          {NAV_LINKS.map(({ label, href }) => {
-            const active = pathname === href;
-            return (
-              <Link
-                key={label}
-                href={href}
-                className={`text-[13px] font-medium transition-colors duration-200 ${
-                  active
-                    ? "text-accent-green font-semibold"
-                    : "text-text/60 hover:text-accent-green"
+          {displayPinned.map(({ label, href }) => (
+            <Link
+              key={label}
+              href={href}
+              className="text-[13px] font-medium transition-colors duration-200 text-text/60 hover:text-accent-green"
+            >
+              {label}
+            </Link>
+          ))}
+
+          {/* Other Dropdown */}
+          {otherCats.length > 0 && (
+            <div className="relative" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="flex items-center gap-1 text-[13px] font-medium text-text/60 hover:text-accent-green transition-colors duration-200 cursor-pointer"
+              >
+                Other
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform duration-300 ${dropdownOpen ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              <div
+                className={`absolute top-full left-0 mt-3 w-48 bg-[#F0EDE6] border border-green-900/10 rounded-xl shadow-lg py-2 origin-top transition-all duration-200 ease-out ${
+                  dropdownOpen ? "opacity-100 translate-y-0 visible" : "opacity-0 -translate-y-2 invisible"
                 }`}
               >
-                {label}
-              </Link>
-            );
-          })}
+                {otherCats.map(cat => (
+                  <Link
+                    key={cat.id}
+                    href={`/?category=${encodeURIComponent(cat.name.toLowerCase())}`}
+                    onClick={() => setDropdownOpen(false)}
+                    className="block w-full text-left px-4 py-2.5 text-sm text-text/70 hover:bg-green-900/5 hover:text-green-900 transition-colors duration-200"
+                  >
+                    {cat.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Link
+            href="/feedback"
+            className="text-[13px] font-medium transition-colors duration-200 text-text/60 hover:text-accent-green"
+          >
+            Feedback
+          </Link>
         </div>
 
         {/* Right Section: Search, Basket, Mobile Toggle */}
@@ -198,6 +264,23 @@ function NavbarContent() {
                 </Link>
               );
             })}
+            
+            {/* Mobile Other Categories */}
+            {otherCats.length > 0 && (
+              <div className="px-3 py-2 text-xs font-semibold text-text/40 uppercase tracking-widest mt-2">
+                Other Categories
+              </div>
+            )}
+            {otherCats.map(cat => (
+              <Link
+                key={cat.id}
+                href={`/?category=${encodeURIComponent(cat.name.toLowerCase())}`}
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-text/70 hover:bg-black/5 hover:text-accent-green pl-6"
+              >
+                {cat.name}
+              </Link>
+            ))}
           </div>
         </div>
       )}
