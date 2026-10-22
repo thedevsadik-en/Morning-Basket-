@@ -86,6 +86,17 @@ function NavbarContent() {
     }
   };
 
+  const handleCategoryClick = (categoryName: string) => {
+    // 1. Update your category state or navigate:
+    router.push(`/?category=${encodeURIComponent(categoryName)}#catalog`, { scroll: false });
+
+    // 2. Smoothly scroll down to the product catalog:
+    const catalogElement = document.getElementById("catalog");
+    if (catalogElement) {
+      catalogElement.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   const activeCategoryParam = (searchParams.get("category") || "").toLowerCase();
 
   return (
@@ -213,7 +224,13 @@ function NavbarContent() {
                 return (
                   <Link
                     key={c.id || c.name}
-                    href={`/?category=${encodeURIComponent(c.name.toLowerCase())}`}
+                    href={`/?category=${encodeURIComponent(c.name.toLowerCase())}#catalog`}
+                    onClick={(e) => {
+                      if (pathname === "/") {
+                        e.preventDefault();
+                      }
+                      handleCategoryClick(c.name.toLowerCase());
+                    }}
                     className={`text-sm flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                       isActive
                         ? "text-[#1E3324] font-semibold"
@@ -299,8 +316,14 @@ function NavbarContent() {
               return (
                 <Link
                   key={c.id || c.name}
-                  href={`/?category=${encodeURIComponent(c.name.toLowerCase())}`}
-                  onClick={() => setMobileMenuOpen(false)}
+                  href={`/?category=${encodeURIComponent(c.name.toLowerCase())}#catalog`}
+                  onClick={(e) => {
+                    setMobileMenuOpen(false);
+                    if (pathname === "/") {
+                      e.preventDefault();
+                    }
+                    handleCategoryClick(c.name.toLowerCase());
+                  }}
                   className={`px-3.5 py-2.5 rounded-xl text-sm transition-colors flex items-center justify-between ${
                     isActive
                       ? "bg-[#1E3324] text-[#F8F6F0] font-semibold"

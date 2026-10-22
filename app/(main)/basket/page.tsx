@@ -4,9 +4,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCart, CartUnit } from "@/lib/useCart";
+import { useStoreSettings } from "@/lib/useStoreSettings";
 import { supabase } from "@/lib/supabaseClient";
-
-const DELIVERY_FEE = 60;
 
 interface VerifiedProduct {
   id: string;
@@ -32,6 +31,18 @@ const DISCRETE_UNITS = [
 
 export default function BasketPage() {
   const { cart, removeItem, clearCart, addOrUpdate } = useCart();
+  const { settings } = useStoreSettings();
+
+  const minOrderValue = settings.min_order_value;
+  const freeDeliveryThreshold = settings.free_delivery_threshold;
+  const deliveryFee = settings.delivery_fee;
+  const bkashNumber = settings.bkash_number;
+
+  // Safe Hydration Guard
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Form states
   const [customerName, setCustomerName] = useState("");
@@ -42,15 +53,9 @@ export default function BasketPage() {
   const [trxId, setTrxId] = useState("");
   const [honeypot, setHoneypot] = useState("");
 
-  const [storeSettings, setStoreSettings] = useState({
-    minimum_order_value: 450,
-    bkash_number: "01712069030",
-  });
-
-  // App states
-  const [hasMounted, setHasMounted] = useState(false);
+  // App & Verification states
   const [verifiedProducts, setVerifiedProducts] = useState<Record<string, VerifiedProduct>>({});
-  const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [placedOrderSummary, setPlacedOrderSummary] = useState<{
@@ -61,10 +66,6 @@ export default function BasketPage() {
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedBkash, setCopiedBkash] = useState(false);
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
 
   const cartEntries = useMemo(() => Object.entries(cart), [cart]);
   const cartProductIds = useMemo(() => Object.keys(cart), [cart]);
@@ -77,40 +78,31 @@ export default function BasketPage() {
     }
 
     try {
-      const { data: settingsData } = await supabase
-        .from("store_settings")
-        .select("minimum_order_value, bkash_number")
-        .single();
-      if (settingsData) {
-        setStoreSettings({
-          minimum_order_value: settingsData.minimum_order_value,
-          bkash_number: settingsData.bkash_number,
-        });
-      }
-
+      setIsLoadingCatalog(true);
       const { data, error } = await supabase
         .from("products")
         .select("id, name, price, unit, image_url, is_active")
         .in("id", cartProductIds);
 
-      if (error) throw error;
-
-      const map: Record<string, VerifiedProduct> = {};
-      data?.forEach((item) => {
-        map[String(item.id)] = item as VerifiedProduct;
-      });
-
-      setVerifiedProducts(map);
+      if (!error && data) {
+        const map: Record<string, VerifiedProduct> = {};
+        data.forEach((item) => {
+          map[String(item.id)] = item as VerifiedProduct;
+        });
+        setVerifiedProducts(map);
+      }
     } catch (err) {
-      console.error("Cart sync verification error:", err);
+      console.warn("Cart sync verification notice:", err);
     } finally {
       setIsLoadingCatalog(false);
     }
   }, [cartProductIds]);
 
   useEffect(() => {
-    syncCartItems();
-  }, [syncCartItems]);
+    if (mounted) {
+      syncCartItems();
+    }
+  }, [mounted, syncCartItems]);
 
   // Check if any item in cart is deactivated
   const inactiveItemsInCart = useMemo(() => {
@@ -120,8 +112,8 @@ export default function BasketPage() {
     });
   }, [cartEntries, verifiedProducts]);
 
-  // Subtotal calculation strictly using live verified prices
-  const cartTotal = useMemo(() => {
+  // Subtotal calculation strictly using live verified prices when available
+  const subtotal = useMemo(() => {
     return cartEntries.reduce((sum, [id, item]) => {
       const livePrice = verifiedProducts[id]?.price ?? item.price;
       const unit = (item.unit || "").toLowerCase();
@@ -133,17 +125,22 @@ export default function BasketPage() {
     }, 0);
   }, [cartEntries, verifiedProducts]);
 
-  const neededForMOV = Math.max(0, storeSettings.minimum_order_value - cartTotal);
-  const isMovReached = cartTotal >= storeSettings.minimum_order_value;
+  // Two-tier calculations
+  const isFreeDelivery = subtotal >= freeDeliveryThreshold;
+  const currentDeliveryFee = isFreeDelivery ? 0 : deliveryFee;
+  const totalPayable = subtotal + currentDeliveryFee;
 
-  // Doorstep total depending on payment method
+  const isMovReached = subtotal >= minOrderValue;
+  const neededForMOV = Math.max(0, minOrderValue - subtotal);
+
+  // Doorstep collection depending on payment method
   const totalDueAtDoorstep = useMemo(() => {
     if (paymentMethod === "cod") {
-      return cartTotal + DELIVERY_FEE;
+      return totalPayable;
     }
-    // For bKash pre-pay, ৳60 delivery fee is paid now via bKash; produce subtotal is due at doorstep
-    return cartTotal;
-  }, [cartTotal, paymentMethod]);
+    // For bKash pre-pay, slot fee is paid now via bKash; produce subtotal is due at doorstep
+    return subtotal;
+  }, [paymentMethod, totalPayable, subtotal]);
 
   // Clear errors when the user edits form inputs
   useEffect(() => {
@@ -154,10 +151,10 @@ export default function BasketPage() {
   const handleCopyBkash = async () => {
     try {
       if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(storeSettings.bkash_number);
+        await navigator.clipboard.writeText(bkashNumber);
       } else {
         const input = document.createElement("input");
-        input.value = storeSettings.bkash_number;
+        input.value = bkashNumber;
         document.body.appendChild(input);
         input.select();
         document.execCommand("copy");
@@ -207,7 +204,7 @@ export default function BasketPage() {
 
     if (!isMovReached) {
       setErrorMessage(
-        `Minimum order value is ৳${storeSettings.minimum_order_value}. Please add more items.`
+        `Minimum order value is ৳${minOrderValue}. Please add ৳${Math.ceil(neededForMOV)} more to checkout.`
       );
       return;
     }
@@ -266,7 +263,7 @@ export default function BasketPage() {
     setIsSubmitting(true);
 
     try {
-      // 1. Re-query live product database to prevent client tampering
+      // 1. Re-query live product database to prevent tampering
       const { data: freshProducts, error: freshError } = await supabase
         .from("products")
         .select("id, name, price, unit, is_active")
@@ -278,8 +275,7 @@ export default function BasketPage() {
 
       const freshMap = new Map(freshProducts.map((p) => [String(p.id), p]));
 
-      // Verify all items are active and build secure server-calculated snapshot
-      let authoritativeTotal = 0;
+      let authoritativeSubtotal = 0;
       const verifiedSnapshot = [];
 
       for (const [id, item] of cartEntries) {
@@ -299,7 +295,8 @@ export default function BasketPage() {
             ? item.qty / 1000
             : item.qty;
 
-        authoritativeTotal += normalizedQty * Number(liveRecord.price);
+        const lineTotal = normalizedQty * Number(liveRecord.price);
+        authoritativeSubtotal += lineTotal;
 
         verifiedSnapshot.push({
           product_id: id,
@@ -307,59 +304,45 @@ export default function BasketPage() {
           qty: item.qty,
           unit: item.unit,
           price: Number(liveRecord.price),
+          line_total: Math.round(lineTotal),
         });
       }
 
-      if (authoritativeTotal < storeSettings.minimum_order_value) {
+      if (authoritativeSubtotal < minOrderValue) {
         setErrorMessage(
-          `Verified order total is ৳${Math.round(
-            authoritativeTotal
-          )}, which is below our ৳${storeSettings.minimum_order_value} minimum.`
+          `Verified produce total is ৳${Math.round(
+            authoritativeSubtotal
+          )}, which is below our ৳${minOrderValue} minimum.`
         );
         setIsSubmitting(false);
         return;
       }
 
-      // 2. Customer blacklist check
-      const { data: isBlocked } = await supabase
-        .from("blocked_customers")
-        .select("phone")
-        .eq("phone", standardPhone)
-        .limit(1);
-
-      if (isBlocked && isBlocked.length > 0) {
-        setErrorMessage(
-          "We are currently unable to accept delivery bookings for this phone number. Please contact customer support."
-        );
-        setIsSubmitting(false);
-        return;
-      }
-
-      // 3. Reject duplicate bKash Transaction IDs (only for bKash method)
+      // Check duplicate bKash Transaction IDs if using bKash
       if (paymentMethod === "bkash") {
-        const { data: existingTrx, error: trxCheckError } = await supabase
-          .from("orders")
-          .select("id")
-          .eq("bkash_trx_id", cleanTrx)
-          .limit(1);
+        try {
+          const { data: existingTrx } = await supabase
+            .from("orders")
+            .select("id")
+            .eq("bkash_trx_id", cleanTrx)
+            .limit(1);
 
-        if (trxCheckError) {
-          console.error("Trx check error:", trxCheckError);
-        } else if (existingTrx && existingTrx.length > 0) {
-          setErrorMessage(
-            "This bKash Transaction ID has already been submitted for a previous order."
-          );
-          setIsSubmitting(false);
-          return;
+          if (existingTrx && existingTrx.length > 0) {
+            setErrorMessage(
+              "This bKash Transaction ID has already been submitted for a previous order."
+            );
+            setIsSubmitting(false);
+            return;
+          }
+        } catch {
+          // Non-blocking if table or index is missing
         }
       }
 
-      // Total collected amount snapshot
-      const finalRecordedTotal = Math.round(
-        authoritativeTotal + (paymentMethod === "cod" ? DELIVERY_FEE : 0)
-      );
+      const authoritativeDeliveryFee = authoritativeSubtotal >= freeDeliveryThreshold ? 0 : deliveryFee;
+      const authoritativeFinalTotal = Math.round(authoritativeSubtotal + authoritativeDeliveryFee);
 
-      // 4. Commit order with authoritative server-verified pricing
+      // Commit order
       const { error: insertError } = await supabase.from("orders").insert([
         {
           customer_name: cleanName,
@@ -367,7 +350,7 @@ export default function BasketPage() {
           customer_phone: standardPhone,
           delivery_address: cleanAddress,
           bkash_trx_id: cleanTrx,
-          cart_total: finalRecordedTotal,
+          cart_total: authoritativeFinalTotal,
           cart_items: verifiedSnapshot,
           order_status: "Pending",
         },
@@ -377,7 +360,7 @@ export default function BasketPage() {
 
       setPlacedOrderSummary({
         name: cleanName,
-        total: finalRecordedTotal,
+        total: authoritativeFinalTotal,
         method: paymentMethod,
         itemCount: cartEntries.length,
       });
@@ -394,10 +377,11 @@ export default function BasketPage() {
     }
   };
 
-  if (!hasMounted) {
+  // Safe Hydration Mount Guard
+  if (!mounted) {
     return (
-      <div className="min-h-[85vh] bg-[#F8F6F0] flex items-center justify-center">
-        <div className="w-9 h-9 border-3 border-[#1E3324] border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-[60vh] flex items-center justify-center text-[#1E3324]/40 font-medium">
+        Loading basket...
       </div>
     );
   }
@@ -469,7 +453,7 @@ export default function BasketPage() {
     );
   }
 
-  // Empty Basket View
+  // Empty Cart State (Editorial Empty Basket Card)
   if (cartEntries.length === 0) {
     return (
       <div className="min-h-[85vh] bg-[#F8F6F0] flex flex-col items-center justify-center text-center px-4 py-16">
@@ -490,28 +474,29 @@ export default function BasketPage() {
             </svg>
           </div>
           <h2 className="font-serif font-bold text-2xl text-[#1E3324] mb-2 tracking-tight">
-            Your morning basket is empty.
+            Your basket is currently empty
           </h2>
           <p className="text-[#5A6E5F] text-xs sm:text-sm leading-relaxed mb-6">
-            Add hand-selected dawn produce, fresh greens, and morning pantry essentials to schedule your morning delivery slot.
+            Hand-select dawn fresh vegetables and daily essentials for morning delivery in Dhanmondi.
           </p>
           <Link
-            href="/"
+            href="/#catalog"
             className="inline-flex items-center justify-center gap-2 bg-[#1E3324] hover:bg-[#142419] text-[#F8F6F0] px-7 py-3.5 rounded-xl font-medium text-xs uppercase tracking-wider transition-all shadow-sm active:scale-95"
           >
-            Explore Dawn Harvest →
+            Explore Morning Harvest →
           </Link>
         </div>
       </div>
     );
   }
 
+  // Populated Cart State (Two-Column Sticky Checkout)
   return (
     <div className="min-h-screen bg-[#F8F6F0] text-[#2C332D]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Navigation Breadcrumb */}
         <Link
-          href="/"
+          href="/#catalog"
           className="inline-flex items-center gap-2 text-xs font-semibold text-[#5A6E5F] hover:text-[#1E3324] transition-colors mb-8 group"
         >
           <svg
@@ -523,7 +508,7 @@ export default function BasketPage() {
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
           </svg>
-          <span>Back to Produce Catalog</span>
+          <span>Continue Shopping Produce</span>
         </Link>
 
         {/* 2-Column Responsive Layout */}
@@ -565,7 +550,10 @@ export default function BasketPage() {
                   const price = product?.price ?? item.price;
                   const unit = (item.unit || "kg").toLowerCase();
                   const isWeight = !DISCRETE_UNITS.includes(unit);
-                  const normalizedQty = unit === "g" ? item.qty / 1000 : item.qty;
+                  const normalizedQty =
+                    unit === "g" || unit === "gm" || unit === "gram" || unit === "grams"
+                      ? item.qty / 1000
+                      : item.qty;
                   const lineTotal = normalizedQty * price;
                   const isOutOfStock = product && !product.is_active;
 
@@ -616,7 +604,7 @@ export default function BasketPage() {
                           ৳{price} / {product?.unit || (isWeight ? "kg" : "unit")}
                         </p>
 
-                        {/* Quantity Stepper */}
+                        {/* Stepper (-, qty, +) */}
                         <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded-xl px-2 py-1 text-xs flex items-center gap-2 mt-2 w-fit">
                           <button
                             type="button"
@@ -640,7 +628,7 @@ export default function BasketPage() {
                         </div>
                       </div>
 
-                      {/* Line Price & Trash */}
+                      {/* Line Price & Remove Button */}
                       <div className="flex flex-col items-end justify-between self-stretch shrink-0">
                         <p className="text-[#1E3324] font-semibold text-base">
                           ৳{lineTotal.toFixed(0)}
@@ -687,50 +675,61 @@ export default function BasketPage() {
           {/* ── Right Column (5 Cols on desktop): Sticky Order Summary & Booking Card ── */}
           <aside className="lg:col-span-5 w-full sticky top-24">
             <div className="bg-white rounded-2xl border border-[#EAE6DF] shadow-[0_8px_30px_rgba(30,51,36,0.06)] p-6 sm:p-7">
-              {/* 1. Integrated Price Breakdown (Moved to the Top of the Card) */}
+              {/* 1. Order Summary Breakdown */}
               <div className="mb-6">
-                <div className="flex items-center justify-between text-sm text-[#5A6E5F] mb-2">
+                <div className="flex items-center justify-between text-sm text-[#5A6E5F] mb-2.5">
                   <span>Produce Subtotal</span>
-                  <span className="font-semibold text-[#1E3324]">৳{cartTotal.toFixed(0)}</span>
+                  <span className="font-semibold text-[#1E3324]">৳{subtotal.toFixed(0)}</span>
                 </div>
 
-                <div className="flex items-center justify-between text-sm text-[#5A6E5F] mb-2">
+                <div className="flex items-center justify-between text-sm text-[#5A6E5F] mb-2.5">
                   <div className="flex items-center gap-1.5">
-                    <span>Dawn Delivery Slot</span>
-                    <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-semibold px-2 py-0.5 rounded-full">
-                      5 AM Sourced
-                    </span>
+                    <span>Dawn Delivery Fee</span>
+                    {isFreeDelivery && (
+                      <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-bold px-2 py-0.5 rounded-full">
+                        FREE UNLOCKED
+                      </span>
+                    )}
                   </div>
-                  <span className="font-semibold text-[#1E3324]">৳{DELIVERY_FEE}</span>
+                  <span className="font-semibold text-[#1E3324]">
+                    {isFreeDelivery ? (
+                      <span className="text-emerald-700 font-bold tracking-wide">FREE</span>
+                    ) : (
+                      `৳${deliveryFee}`
+                    )}
+                  </span>
                 </div>
 
-                {paymentMethod === "bkash" && (
-                  <div className="flex items-center justify-between text-xs text-emerald-800 bg-emerald-50/70 p-2 rounded-lg border border-emerald-200/50 mb-2">
+                {paymentMethod === "bkash" && !isFreeDelivery && (
+                  <div className="flex items-center justify-between text-xs text-emerald-800 bg-emerald-50/70 p-2 rounded-lg border border-emerald-200/50 mb-2.5">
                     <span>Pre-paid Slot via bKash</span>
-                    <span className="font-semibold">-৳{DELIVERY_FEE}</span>
+                    <span className="font-semibold">-৳{deliveryFee}</span>
                   </div>
                 )}
 
-                <div className="border-t border-[#F0EDE6] my-3" />
+                <div className="border-t border-[#F0EDE6] my-3.5" />
 
                 <div className="flex items-baseline justify-between">
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wider text-[#1E3324] block">
-                      Total Due at Doorstep
+                      Total Payable
                     </span>
                     <span className="text-[11px] text-[#7A8C7E] leading-tight block mt-0.5">
                       {paymentMethod === "cod"
-                        ? "Pay upon doorstep inspection"
-                        : "Produce balance due upon doorstep inspection"}
+                        ? "100% Cash on Delivery at doorstep"
+                        : isFreeDelivery
+                        ? "Full amount due upon doorstep inspection"
+                        : "Slot fee prepaid; balance due at doorstep"}
                     </span>
                   </div>
                   <span className="text-[#1E3324] font-serif font-bold text-2xl">
-                    ৳{totalDueAtDoorstep.toFixed(0)}
+                    ৳{totalPayable.toFixed(0)}
                   </span>
                 </div>
 
+                {/* Minimum Order Alert */}
                 {!isMovReached && (
-                  <div className="mt-4 p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                  <div className="mt-4 p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-center gap-2">
                     <svg className="w-4 h-4 shrink-0 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
@@ -740,13 +739,13 @@ export default function BasketPage() {
                       />
                     </svg>
                     <span>
-                      Add ৳{neededForMOV.toFixed(0)} more produce to meet the ৳{storeSettings.minimum_order_value} minimum order.
+                      Minimum order value is ৳{minOrderValue}. Please add ৳{Math.ceil(neededForMOV)} more to checkout.
                     </span>
                   </div>
                 )}
               </div>
 
-              {/* Booking Form */}
+              {/* Customer Address & Booking Form */}
               <form onSubmit={handleConfirmOrder} className="space-y-4">
                 {errorMessage && (
                   <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex items-center gap-2">
@@ -825,7 +824,7 @@ export default function BasketPage() {
                       htmlFor="basket-customer-phone"
                       className="text-[11px] font-semibold text-[#1E3324] uppercase tracking-wider mb-1.5 block"
                     >
-                      WhatsApp Number <span className="text-emerald-700">*</span>
+                      Phone (WhatsApp) <span className="text-emerald-700">*</span>
                     </label>
                     <input
                       type="tel"
@@ -845,7 +844,7 @@ export default function BasketPage() {
                     htmlFor="basket-delivery-address"
                     className="text-[11px] font-semibold text-[#1E3324] uppercase tracking-wider mb-1.5 block"
                   >
-                    Street & Building Address <span className="text-emerald-700">*</span>
+                    Delivery Address <span className="text-emerald-700">*</span>
                   </label>
                   <input
                     type="text"
@@ -859,10 +858,10 @@ export default function BasketPage() {
                   />
                 </div>
 
-                {/* 3. Payment Method Toggle */}
+                {/* Payment Method Toggle */}
                 <div>
                   <span className="text-[11px] font-semibold text-[#1E3324] uppercase tracking-wider mb-2 block">
-                    Payment Protocol
+                    Payment Method
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {/* COD Pill */}
@@ -894,7 +893,7 @@ export default function BasketPage() {
                           paymentMethod === "cod" ? "text-[#E0E7E1]" : "text-[#7A8C7E]"
                         }`}
                       >
-                        Inspect first, pay at door
+                        Inspect First, pay at door
                       </span>
                     </button>
 
@@ -909,7 +908,7 @@ export default function BasketPage() {
                       }`}
                     >
                       <div className="flex items-center justify-between w-full mb-1">
-                        <span className="text-xs font-semibold">bKash / Pre-pay Slot</span>
+                        <span className="text-xs font-semibold">bKash</span>
                         <span
                           className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
                             paymentMethod === "bkash"
@@ -927,7 +926,7 @@ export default function BasketPage() {
                           paymentMethod === "bkash" ? "text-[#E0E7E1]" : "text-[#7A8C7E]"
                         }`}
                       >
-                        Send ৳60 slot fee
+                        {isFreeDelivery ? "Full amount / tip" : `Send ৳${deliveryFee} slot fee`}
                       </span>
                     </button>
                   </div>
@@ -940,12 +939,16 @@ export default function BasketPage() {
                       <svg className="w-4 h-4 text-emerald-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <span>Send ৳{DELIVERY_FEE} via bKash Personal</span>
+                      <span>
+                        {isFreeDelivery
+                          ? "Send via bKash Personal"
+                          : `Send ৳${deliveryFee} Slot Fee via bKash Personal`}
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between bg-white px-3.5 py-2.5 rounded-xl border border-[#EAE6DF]">
                       <span className="font-mono text-xs font-bold tracking-wider text-[#1E3324]">
-                        {storeSettings.bkash_number}
+                        {bkashNumber}
                       </span>
                       <button
                         type="button"
@@ -957,7 +960,9 @@ export default function BasketPage() {
                     </div>
 
                     <p className="text-[11px] text-[#5A6E5F] leading-relaxed">
-                      Send Money ৳{DELIVERY_FEE} to guarantee tomorrow&apos;s morning slot. Balance produce total of ৳{cartTotal.toFixed(0)} is paid after inspecting items at your door.
+                      {isFreeDelivery
+                        ? "Delivery is free on this order! You can prepay your order total or tip our caretakers."
+                        : `Send Money ৳${deliveryFee} to guarantee tomorrow's morning slot. Balance produce total of ৳${subtotal.toFixed(0)} is paid after inspecting items at your door.`}
                     </p>
 
                     <div>
@@ -981,7 +986,7 @@ export default function BasketPage() {
                   </div>
                 )}
 
-                {/* 4. Action Button */}
+                {/* Action Button */}
                 <button
                   type="submit"
                   id="confirm-order-btn"
@@ -999,11 +1004,11 @@ export default function BasketPage() {
                       <span>Securing Dawn Slot...</span>
                     </>
                   ) : (
-                    <span>Confirm Order & Lock Dawn Slot →</span>
+                    <span>Confirm Order &amp; Lock Dawn Slot →</span>
                   )}
                 </button>
 
-                {/* 5. Reassurance Badge */}
+                {/* Reassurance Badge */}
                 <div className="flex items-center justify-center gap-1.5 text-center mt-3 text-[11px] text-[#5A6E5F]">
                   <svg
                     className="w-3.5 h-3.5 text-[#1E3324] shrink-0"
@@ -1018,7 +1023,7 @@ export default function BasketPage() {
                       d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
                     />
                   </svg>
-                  <span>Backed by 100% Doorstep Inspection & Instant Refund Guarantee.</span>
+                  <span>Backed by 100% Doorstep Inspection &amp; Instant Refund Guarantee.</span>
                 </div>
               </form>
             </div>

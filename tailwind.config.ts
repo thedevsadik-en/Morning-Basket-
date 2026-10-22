@@ -34,6 +34,9 @@ const config: Config = {
           borderLight: "#E2DED6",
         },
       },
+      transitionDuration: {
+        "400": "400ms",
+      },
     },
   },
   plugins: [],

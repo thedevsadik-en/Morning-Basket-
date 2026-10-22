@@ -14,6 +14,7 @@ import ProductCard, {
 import StorefrontHero from "./components/StorefrontHero";
 import TrustBar from "./components/TrustBar";
 import FloatingBasketDock from "./components/FloatingBasketDock";
+import { useStoreSettings } from "@/lib/useStoreSettings";
 
 function SkeletonCard() {
   return (
@@ -105,9 +106,10 @@ function getCuratedDefaultProducts(products: Product[], targetCount = 12): Produ
 
 function HomeContent() {
   const { cart, addOrUpdate, totalItems } = useCart();
+  const { settings } = useStoreSettings();
+  const minimumOrderValue = settings.min_order_value;
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [minimumOrderValue, setMinimumOrderValue] = useState(450); // Default fallback
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -132,12 +134,22 @@ function HomeContent() {
     }));
   };
 
-  // Sync category if passed in URL query param
+  // Sync category if passed in URL query param and auto-scroll to catalog
   useEffect(() => {
     if (urlCategory) {
       setSelectedCategory(urlCategory.toLowerCase());
     } else {
       setSelectedCategory(null);
+    }
+
+    if (typeof window !== "undefined" && (window.location.hash === "#catalog" || urlCategory)) {
+      const timer = setTimeout(() => {
+        const catalogEl = document.getElementById("catalog");
+        if (catalogEl) {
+          catalogEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 50);
+      return () => clearTimeout(timer);
     }
   }, [urlCategory]);
 
@@ -157,15 +169,6 @@ function HomeContent() {
       setFetchError(null);
 
       try {
-        // Fetch store settings
-        const { data: settingsData } = await supabase
-          .from("store_settings")
-          .select("minimum_order_value")
-          .single();
-        if (settingsData) {
-          setMinimumOrderValue(settingsData.minimum_order_value);
-        }
-
         // Fetch dynamic categories
         const { data: catData } = await supabase
           .from("categories")
@@ -317,9 +320,9 @@ function HomeContent() {
       <TrustBar />
 
       {/* ── Product Catalog Area ─────────────────────────────────────── */}
-      <main
-        id="product-catalog"
-        className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-32 md:pb-24"
+      <section
+        id="catalog"
+        className="scroll-mt-24 flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 pb-28 sm:pb-32"
       >
         {/* Catalog Section Header */}
         <div className="text-center mb-6">
@@ -480,7 +483,7 @@ function HomeContent() {
             )}
           </div>
         </section>
-      </main>
+      </section>
 
       {/* ── Non-Intrusive Floating Basket Dock ─────────────────────────── */}
       <FloatingBasketDock

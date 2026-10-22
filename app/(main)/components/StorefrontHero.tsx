@@ -4,7 +4,9 @@ import Image from "next/image";
 
 export default function StorefrontHero() {
   const scrollToCatalog = () => {
-    const catalogSection = document.getElementById("product-catalog");
+    const catalogSection =
+      document.getElementById("catalog") ||
+      document.getElementById("product-catalog");
     if (catalogSection) {
       catalogSection.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -44,9 +46,12 @@ export default function StorefrontHero() {
             </p>
 
             {/* CTA Button */}
-            <button
-              type="button"
-              onClick={scrollToCatalog}
+            <a
+              href="#catalog"
+              onClick={(e) => {
+                e.preventDefault();
+                scrollToCatalog();
+              }}
               className="inline-flex items-center gap-2 bg-[#F8F6F0] text-[#1B3823] font-semibold text-sm px-7 py-3.5 rounded-xl shadow-sm hover:bg-white hover:text-[#142419] active:scale-[0.98] transition-all cursor-pointer"
             >
               Order Now
@@ -64,7 +69,7 @@ export default function StorefrontHero() {
                   d="M14 5l7 7m0 0l-7 7m7-7H3"
                 />
               </svg>
-            </button>
+            </a>
           </div>
         </div>
       </div>

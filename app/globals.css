@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   :root {
     --background: #F8F6F0;   /* Warm Heritage Cream */
     --foreground: #2C332D;   /* Softened Charcoal */

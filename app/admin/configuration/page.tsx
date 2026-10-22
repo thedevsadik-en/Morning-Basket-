@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { useStoreSettings } from "@/lib/useStoreSettings";
 
 interface Category {
   id: string;
@@ -9,12 +10,27 @@ interface Category {
 }
 
 export default function ConfigurationPage() {
+  const { settings, loading: isLoadingSettings, updateSettings } = useStoreSettings();
+
   // --- Store Settings State ---
+  const [minOrderValue, setMinOrderValue] = useState("");
+  const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState("");
+  const [deliveryFee, setDeliveryFee] = useState("");
   const [bkashNumber, setBkashNumber] = useState("");
-  const [minimumOrderValue, setMinimumOrderValue] = useState("");
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+
   const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [settingsMessage, setSettingsMessage] = useState({ text: "", type: "" });
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Sync state once settings load
+  useEffect(() => {
+    if (!isLoadingSettings) {
+      setMinOrderValue(settings.min_order_value.toString());
+      setFreeDeliveryThreshold(settings.free_delivery_threshold.toString());
+      setDeliveryFee(settings.delivery_fee.toString());
+      setBkashNumber(settings.bkash_number);
+    }
+  }, [isLoadingSettings, settings]);
 
   // --- Categories State ---
   const [categories, setCategories] = useState<Category[]>([]);
@@ -23,30 +39,9 @@ export default function ConfigurationPage() {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [categoryError, setCategoryError] = useState("");
 
-  // --- Fetch Data ---
+  // Fetch Categories
   useEffect(() => {
-    async function fetchData() {
-      // Fetch Settings
-      try {
-        const { data: settingsData, error: settingsError } = await supabase
-          .from("store_settings")
-          .select("*")
-          .eq("id", 1)
-          .single();
-
-        if (settingsError) throw settingsError;
-        if (settingsData) {
-          setBkashNumber(settingsData.bkash_number || "");
-          setMinimumOrderValue(settingsData.minimum_order_value?.toString() || "");
-        }
-      } catch (err: any) {
-        console.error("Error fetching settings:", err.message);
-        setSettingsMessage({ text: "Could not load settings.", type: "error" });
-      } finally {
-        setIsLoadingSettings(false);
-      }
-
-      // Fetch Categories
+    async function fetchCategories() {
       try {
         const { data: catData, error: catError } = await supabase
           .from("categories")
@@ -62,32 +57,36 @@ export default function ConfigurationPage() {
         setIsLoadingCategories(false);
       }
     }
-    
-    fetchData();
+
+    fetchCategories();
   }, []);
 
   // --- Handlers ---
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingSettings(true);
-    setSettingsMessage({ text: "", type: "" });
+    setToastMessage(null);
+    setErrorMessage(null);
 
-    try {
-      const { error } = await supabase
-        .from("store_settings")
-        .update({
-          bkash_number: bkashNumber,
-          minimum_order_value: Number(minimumOrderValue)
-        })
-        .eq("id", 1);
+    const mov = Number(minOrderValue) || 300;
+    const fdt = Number(freeDeliveryThreshold) || 700;
+    const fee = Number(deliveryFee) || 60;
+    const bk = bkashNumber.trim() || "01712069030";
 
-      if (error) throw error;
-      setSettingsMessage({ text: "Settings saved successfully!", type: "success" });
-    } catch (err: any) {
-      console.error("Error saving settings:", err.message);
-      setSettingsMessage({ text: err.message || "Failed to save settings.", type: "error" });
-    } finally {
-      setIsSavingSettings(false);
+    const result = await updateSettings({
+      min_order_value: mov,
+      free_delivery_threshold: fdt,
+      delivery_fee: fee,
+      bkash_number: bk,
+    });
+
+    setIsSavingSettings(false);
+
+    if (result.success) {
+      setToastMessage("Store configuration updated successfully.");
+      setTimeout(() => setToastMessage(null), 4000);
+    } else {
+      setErrorMessage(result.error || "Failed to save settings.");
     }
   };
 
@@ -104,9 +103,11 @@ export default function ConfigurationPage() {
 
       if (error) throw error;
       setNewCategory("");
-      
-      // Refresh categories
-      const { data } = await supabase.from("categories").select("*").order("name", { ascending: true });
+
+      const { data } = await supabase
+        .from("categories")
+        .select("*")
+        .order("name", { ascending: true });
       setCategories(data || []);
     } catch (err: any) {
       console.error("Error adding category:", err);
@@ -120,15 +121,13 @@ export default function ConfigurationPage() {
     if (!confirm("Are you sure you want to delete this category?")) return;
 
     try {
-      const { error } = await supabase
-        .from("categories")
-        .delete()
-        .eq("id", id);
-
+      const { error } = await supabase.from("categories").delete().eq("id", id);
       if (error) throw error;
-      
-      // Refresh categories
-      const { data } = await supabase.from("categories").select("*").order("name", { ascending: true });
+
+      const { data } = await supabase
+        .from("categories")
+        .select("*")
+        .order("name", { ascending: true });
       setCategories(data || []);
     } catch (err: any) {
       console.error("Error deleting category:", err);
@@ -137,47 +136,139 @@ export default function ConfigurationPage() {
   };
 
   const fieldClass =
-    "w-full border border-neutral-300 rounded-xl px-4 py-3 bg-white text-text text-sm focus:outline-none focus:ring-2 focus:ring-[#2C5F2D]/20 focus:border-[#2C5F2D] transition-all";
+    "w-full border border-[#EAE6DF] rounded-xl px-4 py-3 bg-[#FAF9F6] text-[#1E3324] text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1E3324]/10 focus:border-[#1E3324] transition-all";
   const labelClass =
-    "block text-xs font-bold uppercase tracking-widest text-text/50 mb-1.5";
+    "block text-xs font-semibold uppercase tracking-wider text-[#5A6E5F] mb-1.5";
 
   if (isLoadingSettings || isLoadingCategories) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="w-8 h-8 border-4 border-[#2C5F2D] border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-4 border-[#1E3324] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl space-y-12">
+    <div className="max-w-4xl space-y-10">
       <div>
-        <h1 className="text-3xl font-serif font-bold mb-2">Configuration</h1>
-        <p className="text-sm text-text/60">
-          Manage your storefront settings and dynamic categories.
+        <h1 className="text-3xl font-serif font-bold text-[#1E3324] mb-2 tracking-tight">
+          Configuration &amp; Policies
+        </h1>
+        <p className="text-sm text-[#5A6E5F]">
+          Control delivery thresholds, minimum order requirements, bKash routing, and dynamic produce categories.
         </p>
       </div>
 
-      {/* --- Store Settings Card --- */}
-      <section>
-        <h2 className="text-xl font-serif font-bold mb-4 text-[#2C5F2D]">Store Settings</h2>
-        
-        {settingsMessage.text && (
-          <div
-            className={`p-4 mb-4 rounded-xl text-sm font-medium ${
-              settingsMessage.type === "success"
-                ? "bg-green-50 text-green-800 border border-green-200"
-                : "bg-red-50 text-red-800 border border-red-200"
-            }`}
-          >
-            {settingsMessage.text}
+      {/* --- Toast / Alert Notification --- */}
+      {toastMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-50 text-emerald-900 border border-emerald-200 text-sm font-semibold flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2">
+            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">
+              ✓
+            </span>
+            <span>{toastMessage}</span>
           </div>
-        )}
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 text-sm font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
-        <form onSubmit={handleSaveSettings} className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-neutral-100 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {errorMessage && (
+        <div className="p-4 rounded-2xl bg-red-50 text-red-900 border border-red-200 text-sm font-medium flex items-center justify-between shadow-xs">
+          <span>{errorMessage}</span>
+          <button
+            type="button"
+            onClick={() => setErrorMessage(null)}
+            className="text-red-700 hover:text-red-900 text-sm font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* --- Store Settings Card (4-Field Grid) --- */}
+      <section className="bg-white p-6 sm:p-8 rounded-3xl border border-[#EAE6DF] shadow-xs">
+        <div className="border-b border-[#F0EDE6] pb-4 mb-6">
+          <h2 className="text-xl font-serif font-bold text-[#1E3324]">
+            Store Delivery &amp; Order Policies
+          </h2>
+          <p className="text-xs text-[#5A6E5F] mt-1">
+            These values immediately dictate checkout limits and delivery fee calculations across the storefront and floating cart.
+          </p>
+        </div>
+
+        <form onSubmit={handleSaveSettings} className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {/* 1. Minimum Order Value (MOV) */}
             <div>
-              <label className={labelClass}>bKash Number</label>
+              <label className={labelClass}>
+                Minimum Order Value (MOV ৳) <span className="text-[#1E3324]">*</span>
+              </label>
+              <input
+                type="number"
+                required
+                min="0"
+                step="10"
+                value={minOrderValue}
+                onChange={(e) => setMinOrderValue(e.target.value)}
+                className={fieldClass}
+                placeholder="e.g. 300"
+              />
+              <span className="text-[11px] text-[#7A8C7E] mt-1 block">
+                Absolute minimum cart subtotal required to place an order.
+              </span>
+            </div>
+
+            {/* 2. Free Delivery Threshold */}
+            <div>
+              <label className={labelClass}>
+                Free Delivery Threshold (৳) <span className="text-[#1E3324]">*</span>
+              </label>
+              <input
+                type="number"
+                required
+                min="0"
+                step="50"
+                value={freeDeliveryThreshold}
+                onChange={(e) => setFreeDeliveryThreshold(e.target.value)}
+                className={fieldClass}
+                placeholder="e.g. 700"
+              />
+              <span className="text-[11px] text-[#7A8C7E] mt-1 block">
+                Subtotal where the delivery fee automatically drops to ৳0 (FREE).
+              </span>
+            </div>
+
+            {/* 3. Standard Delivery Fee */}
+            <div>
+              <label className={labelClass}>
+                Standard Delivery Fee (৳) <span className="text-[#1E3324]">*</span>
+              </label>
+              <input
+                type="number"
+                required
+                min="0"
+                step="5"
+                value={deliveryFee}
+                onChange={(e) => setDeliveryFee(e.target.value)}
+                className={fieldClass}
+                placeholder="e.g. 60"
+              />
+              <span className="text-[11px] text-[#7A8C7E] mt-1 block">
+                Delivery charge applied when order subtotal is below the free threshold.
+              </span>
+            </div>
+
+            {/* 4. bKash Number */}
+            <div>
+              <label className={labelClass}>
+                Store bKash Number <span className="text-[#1E3324]">*</span>
+              </label>
               <input
                 type="text"
                 required
@@ -186,47 +277,45 @@ export default function ConfigurationPage() {
                 className={fieldClass}
                 placeholder="e.g. 01712069030"
               />
-            </div>
-
-            <div>
-              <label className={labelClass}>Minimum Order Value (৳)</label>
-              <input
-                type="number"
-                required
-                min="0"
-                step="1"
-                value={minimumOrderValue}
-                onChange={(e) => setMinimumOrderValue(e.target.value)}
-                className={fieldClass}
-                placeholder="e.g. 450"
-              />
+              <span className="text-[11px] text-[#7A8C7E] mt-1 block">
+                Official merchant/personal bKash wallet number displayed at checkout.
+              </span>
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={isSavingSettings}
-            className={`w-full md:w-auto px-8 py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider transition-all flex justify-center items-center gap-2 ${
-              isSavingSettings
-                ? "bg-[#23301B]/50 cursor-not-allowed"
-                : "bg-[#23301B] hover:bg-black active:scale-[0.99] cursor-pointer"
-            } text-[#F6F1E4]`}
-          >
-            {isSavingSettings ? (
-              <>
-                <div className="w-4 h-4 border-2 border-[#F6F1E4] border-t-transparent rounded-full animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save Settings"
-            )}
-          </button>
+          <div className="pt-2 flex justify-end">
+            <button
+              type="submit"
+              disabled={isSavingSettings}
+              className={`w-full sm:w-auto px-8 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex justify-center items-center gap-2 cursor-pointer ${
+                isSavingSettings
+                  ? "bg-[#1E3324]/60 text-white/70 cursor-not-allowed"
+                  : "bg-[#1E3324] hover:bg-[#142419] text-[#F8F6F0] shadow-sm active:scale-98"
+              }`}
+            >
+              {isSavingSettings ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-[#F8F6F0] border-t-transparent rounded-full animate-spin" />
+                  <span>Saving Changes...</span>
+                </>
+              ) : (
+                "Save Settings"
+              )}
+            </button>
+          </div>
         </form>
       </section>
 
       {/* --- Categories Card --- */}
-      <section>
-        <h2 className="text-xl font-serif font-bold mb-4 text-[#2C5F2D]">Categories</h2>
+      <section className="bg-white p-6 sm:p-8 rounded-3xl border border-[#EAE6DF] shadow-xs">
+        <div className="border-b border-[#F0EDE6] pb-4 mb-6">
+          <h2 className="text-xl font-serif font-bold text-[#1E3324]">
+            Storefront Categories
+          </h2>
+          <p className="text-xs text-[#5A6E5F] mt-1">
+            Manage the produce collections that appear on the storefront navbar and filter tabs.
+          </p>
+        </div>
 
         {categoryError && (
           <div className="bg-red-50 text-red-800 border border-red-200 p-4 mb-4 rounded-xl text-sm font-medium">
@@ -234,49 +323,47 @@ export default function ConfigurationPage() {
           </div>
         )}
 
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-neutral-100 space-y-6">
+        <div className="space-y-6">
           <form onSubmit={handleAddCategory} className="flex flex-col sm:flex-row gap-4 items-end">
             <div className="flex-1 w-full">
-              <label className={labelClass}>
-                New Category Name
-              </label>
+              <label className={labelClass}>New Category Name</label>
               <input
                 type="text"
                 required
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
                 className={fieldClass}
-                placeholder="e.g. Dairy"
+                placeholder="e.g. Dairy & Eggs"
               />
             </div>
             <button
               type="submit"
               disabled={isAddingCategory || !newCategory.trim()}
-              className="w-full sm:w-auto bg-[#2C5F2D] hover:bg-[#1f4220] text-white px-8 py-3 rounded-xl font-bold text-sm uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer h-[46px]"
+              className="w-full sm:w-auto bg-[#1E3324] hover:bg-[#142419] text-[#F8F6F0] px-7 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer h-[46px] shadow-sm"
             >
-              {isAddingCategory ? "Adding..." : "Add"}
+              {isAddingCategory ? "Adding..." : "Add Category"}
             </button>
           </form>
 
-          <div className="border border-neutral-200 rounded-2xl overflow-hidden">
+          <div className="border border-[#EAE6DF] rounded-2xl overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-neutral-50 border-b border-neutral-200 text-neutral-500">
+                <tr className="bg-[#FAF9F6] border-b border-[#EAE6DF] text-[#5A6E5F]">
                   <th className="p-4 font-bold text-xs uppercase tracking-widest">Category Name</th>
                   <th className="p-4 font-bold text-xs uppercase tracking-widest text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody className="divide-y divide-[#F0EDE6]">
                 {categories.map((category) => (
-                  <tr key={category.id} className="hover:bg-neutral-50/50 transition-colors">
+                  <tr key={category.id} className="hover:bg-[#FAF9F6]/50 transition-colors">
                     <td className="p-4">
-                      <div className="font-semibold text-neutral-900 text-sm">{category.name}</div>
+                      <div className="font-semibold text-[#1E3324] text-sm">{category.name}</div>
                     </td>
                     <td className="p-4 text-right">
                       <button
                         type="button"
                         onClick={() => handleDeleteCategory(category.id)}
-                        className="px-4 py-2 rounded-xl text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 transition-colors cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 transition-colors cursor-pointer"
                       >
                         Delete
                       </button>
@@ -285,7 +372,7 @@ export default function ConfigurationPage() {
                 ))}
                 {categories.length === 0 && (
                   <tr>
-                    <td colSpan={2} className="p-8 text-center text-neutral-400 font-medium text-sm">
+                    <td colSpan={2} className="p-8 text-center text-[#8A9A8E] font-medium text-sm">
                       No categories found.
                     </td>
                   </tr>
